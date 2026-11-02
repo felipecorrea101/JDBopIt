@@ -1,0 +1,119 @@
+/*
+  Player 1 + Shared test demo (Arduino Mega 2560)
+  Board: Tools > Board > Arduino Mega or Mega 2560
+  Libraries: LiquidCrystal (built in), Keypad (Mark Stanley / Alexander Brevig)
+  Serial Monitor: 9600 baud
+
+  What it tests:
+    - LCD 1            (shows last event on line 1, pot + key on line 2)
+    - Keypad 1         (prints the key pressed)
+    - 4 color buttons  (D2 Red, D3 Green, D4 Black, D5 Yellow)
+    - Sync button D10  (sync LED on D48 lights while pressed)
+    - Start button D12 (start LED on D52 is ON at boot, OFF while pressed)
+    - Dial pot A0      (raw 0-1023 shown on LCD and Serial)
+  Not tested: speaker, toggles, Player 2.
+*/
+
+#include <LiquidCrystal.h>
+#include <Keypad.h>
+
+//                RS  E   D4  D5  D6  D7
+LiquidCrystal lcd(22, 23, 24, 25, 26, 27);
+
+const byte ROWS = 4, COLS = 3;
+char keys[ROWS][COLS] = {
+  {'1', '2', '3'},
+  {'4', '5', '6'},
+  {'7', '8', '9'},
+  {'*', '0', '#'}
+};
+byte rowPins[ROWS] = {37, 38, 39, 40};
+byte colPins[COLS] = {34, 35, 36};
+Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
+
+const byte COLOR_PINS[4] = {2, 3, 4, 5};
+const char* COLOR_NAMES[4] = {"RED", "GREEN", "BLACK", "YELLOW"};
+const byte SYNC_BTN = 10, SYNC_LED = 48;
+const byte START_BTN = 12, START_LED = 52;
+const byte POT = A0;
+
+bool lastColor[4] = {HIGH, HIGH, HIGH, HIGH};
+bool lastSync = HIGH, lastStart = HIGH;
+char lastKey = '-';
+char line1[17] = "Ready";
+unsigned long lastDraw = 0;
+
+void say(const char* s) {
+  snprintf(line1, sizeof(line1), "%-16s", s);
+  Serial.println(s);
+}
+
+void setup() {
+  Serial.begin(9600);
+  lcd.begin(16, 2);
+
+  for (int i = 0; i < 4; i++) pinMode(COLOR_PINS[i], INPUT_PULLUP);
+  pinMode(SYNC_BTN, INPUT_PULLUP);
+  pinMode(START_BTN, INPUT_PULLUP);
+  pinMode(SYNC_LED, OUTPUT);
+  pinMode(START_LED, OUTPUT);
+
+  digitalWrite(START_LED, HIGH);   // "ready to start"
+  lcd.setCursor(0, 0);
+  lcd.print("P1 TEST DEMO    ");
+  delay(1000);
+  Serial.println("P1 test demo ready");
+}
+
+void loop() {
+  // color buttons
+  for (int i = 0; i < 4; i++) {
+    bool r = digitalRead(COLOR_PINS[i]);
+    if (r != lastColor[i]) {
+      lastColor[i] = r;
+      if (r == LOW) {
+        char buf[17];
+        snprintf(buf, sizeof(buf), "%s btn", COLOR_NAMES[i]);
+        say(buf);
+      }
+      delay(20);   // crude debounce
+    }
+  }
+
+  // sync button + sync LED
+  bool s = digitalRead(SYNC_BTN);
+  digitalWrite(SYNC_LED, s == LOW);
+  if (s != lastSync) {
+    lastSync = s;
+    if (s == LOW) say("SYNC pressed");
+    delay(20);
+  }
+
+  // start button + start LED
+  bool st = digitalRead(START_BTN);
+  digitalWrite(START_LED, st == HIGH);   // on at rest, off while held
+  if (st != lastStart) {
+    lastStart = st;
+    if (st == LOW) say("START pressed");
+    delay(20);
+  }
+
+  // keypad
+  char k = keypad.getKey();
+  if (k) {
+    lastKey = k;
+    char buf[17];
+    snprintf(buf, sizeof(buf), "Key: %c", k);
+    say(buf);
+  }
+
+  // refresh LCD ~10x per second
+  if (millis() - lastDraw > 100) {
+    lastDraw = millis();
+    int p = analogRead(POT);
+    char buf[17];
+    snprintf(buf, sizeof(buf), "Pot:%4d Key:%c  ", p, lastKey);
+    lcd.setCursor(0, 0); lcd.print(line1);
+    lcd.setCursor(0, 1); lcd.print(buf);
+  }
+}
