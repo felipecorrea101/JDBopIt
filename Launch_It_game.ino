@@ -12,8 +12,8 @@
       instruction for it is shown on the OTHER player's screen. The other player
       reads/says it. (Player 1's task shows on Player 2's screen and vice versa.)
     - Both players act at the same time. If both finish before the time limit,
-      score +1 and the time limit shrinks. Any wrong action or timeout = GAME OVER.
-    - Reach WIN_SCORE and the rocket launches (MISSION COMPLETE).
+      score +1 and the time limit shrinks. Any wrong action or timeout = 1 strike.
+    - 3 strikes and you are out. Reach WIN_SCORE (99) and the rocket launches (MISSION COMPLETE).
     - Task types: PASSWORD (keypad), SYNC press, HOLD a color, COLOR code,
       launch DIAL, SWITCH code. A different sound plays for each task type.
     - COLOR letters: R = Red, G = Green, B = Black, Y = Yellow.
@@ -46,7 +46,8 @@
 #define TEST_TASK -1       // -1 = normal game. 0 PASSWORD, 1 SYNC, 2 HOLD, 3 COLOR, 4 DIAL, 5 SWITCH
                            // = test mode: only that task, and a failure just retries (no game over)
 
-const int  WIN_SCORE = 100;
+const int  WIN_SCORE = 99;               // game ends after 99 successes (assignment spec)
+const int  MAX_STRIKES = 3;             // 3 strikes and you are out
 const long TIME_START = 10000;            // ms allowed per round at the start
 const long TIME_MIN   = 4000;             // ms allowed per round at the end
 const long TIME_STEP  = 60;               // ms removed after every success
@@ -71,6 +72,11 @@ const uint8_t BAR_ADDR_2 = 0x70;          // bargraph, set that one to 0x71
   #define LOG(...)   do {} while (0)
   #define LOGLN(...) do {} while (0)
 #endif
+
+// Types first: the Arduino IDE puts auto-made function prototypes above
+// the first function, so any type used in a function signature must come before it.
+enum Task : uint8_t { T_PASSWORD, T_SYNC, T_HOLD, T_COLOR, T_DIAL, T_SWITCH, NUM_TASKS };
+enum Phase : uint8_t { WAITING, READY, PLAYING, RESULT, GAMEOVER, WON };
 
 // ======================= HARDWARE =======================
 //                RS  E   D4  D5  D6  D7
@@ -175,9 +181,6 @@ void updateSound() {
 }
 
 // ======================= GAME STATE =======================
-enum Task : uint8_t { T_PASSWORD, T_SYNC, T_HOLD, T_COLOR, T_DIAL, T_SWITCH, NUM_TASKS };
-const char* TASK_NAMES[NUM_TASKS] = {"PASSWORD", "SYNC", "HOLD", "COLOR", "DIAL", "SWITCH"};
-enum Phase : uint8_t { WAITING, READY, PLAYING, RESULT, GAMEOVER, WON };
 
 struct Job {                       // what one player must DO this round
   Task type = T_PASSWORD;
@@ -202,6 +205,7 @@ Phase phase = WAITING;
 unsigned long phaseUntil = 0, roundStart = 0;
 long timeLimit = TIME_START;
 int score = 0;
+int strikes = 0;
 bool roundFailed = false;
 bool syncHas[2] = {false, false};
 unsigned long syncT[2] = {0, 0};
@@ -235,7 +239,7 @@ byte readToggles(byte p) {
 
 void showBars(int sc) {
 #if USE_BARGRAPH
-  int bars = sc * 24 / 100;
+  int bars = sc * 24 / WIN_SCORE;
   for (int i = 0; i < 24; i++) {
     uint8_t c = LED_OFF;
     if (i < bars) c = (i < 16) ? LED_GREEN : (i < 20 ? LED_YELLOW : LED_RED);
@@ -523,14 +527,25 @@ void endRound(bool success) {
     phaseUntil = millis() + RESULT_MS;
   } else {
 #if TEST_TASK >= 0
-    showBoth("TEST: FAILED", "Retrying...");   // test mode: no game over
+    showBoth("TEST: FAILED", "Retrying...");   // test mode: no strikes, no game over
     clearSound();
     PLAY(SND_FAIL);
     phase = RESULT;
     phaseUntil = millis() + 1500;
     return;
 #endif
+    strikes++;
+    LOG("STRIKE "); LOG(strikes); LOG(" of "); LOGLN(MAX_STRIKES);
     char buf[17];
+    if (strikes < MAX_STRIKES) {
+      snprintf(buf, sizeof(buf), "Strike %d of %d", strikes, MAX_STRIKES);
+      showBoth("WRONG!", buf);
+      clearSound();
+      PLAY(SND_FAIL);
+      phase = RESULT;                              // same score, new round
+      phaseUntil = millis() + 1500;
+      return;
+    }
     snprintf(buf, sizeof(buf), "Score:%-3d START", score);
     showBoth("GAME OVER", buf);
     clearSound();
@@ -544,6 +559,7 @@ void endRound(bool success) {
 
 void goReady() {
   score = 0;
+  strikes = 0;
   timeLimit = TIME_START;
   lastTask[0] = lastTask[1] = NUM_TASKS;
   showBars(0);
