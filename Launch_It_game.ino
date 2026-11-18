@@ -45,6 +45,8 @@
 #define DEBUG 1            // 1 = print to Serial Monitor
 #define USE_BARGRAPH 1     // 0 = ignore the bargraphs
 #define DIAL_REVERSED 0    // 1 = swap LEFT and RIGHT if the dial reads backwards
+#define SOLO_P1 1          // 1 = test with ONLY Player 1 wired: P2 finishes every task automatically,
+                           //     and P1's task shows on P1's own screen (LCD 1)
 #define TEST_TASK -1       // -1 = normal game. 0 PASSWORD, 1 SYNC, 2 HOLD, 3 COLOR, 4 DIAL, 5 SWITCH
                            // = test mode: only that task, and a failure just retries (no game over)
 
@@ -271,7 +273,12 @@ void failRound(byte p, const char* why) {
 void showInstruction(byte p) {
   char l1[17], l2[17];
   Job &j = job[p];
+#if SOLO_P1
+  if (p == 1) return;              // P2 is not wired: nothing to show
+  byte scr = 0;                    // solo: show P1's task on P1's own screen
+#else
   byte scr = 1 - p;
+#endif
   switch (j.type) {
     case T_PASSWORD:
       snprintf(l1, sizeof(l1), "P%d PASSWORD:", p + 1);
@@ -386,6 +393,9 @@ void startRound() {
   clearSound();
   initJob(0, t[0]);
   initJob(1, t[1]);
+#if SOLO_P1
+  job[1].done = true;              // P2 not wired: counts as finished
+#endif
 
   if (t[0] == T_SYNC) {
     showBoth("SYNC PRESS!", "BOTH PRESS RED");
@@ -404,6 +414,11 @@ void startRound() {
 // ======================= TASK LOGIC =======================
 void updateSync() {
   unsigned long now = millis();
+#if SOLO_P1
+  if (colorBtn[0][0].wasPressed()) { job[0].done = job[1].done = true; }   // one red press is enough
+  setSyncLeds((now / 250) % 2 == 0);
+  return;
+#endif
   for (byte p = 0; p < 2; p++) {
     if (colorBtn[p][0].wasPressed()) { syncHas[p] = true; syncT[p] = colorBtn[p][0].pressTime; }
   }
