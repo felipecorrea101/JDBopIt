@@ -45,6 +45,8 @@
 #define DEBUG 1            // 1 = print to Serial Monitor
 #define USE_BARGRAPH 1     // 0 = ignore the bargraphs
 #define DIAL_REVERSED 0    // 1 = swap LEFT and RIGHT if the dial reads backwards
+#define START_WITH_KEY 1   // 1 = pressing # on a keypad also starts / restarts the game
+                           //     (for testing before the start button is soldered in)
 #define SOLO_P1 1          // 1 = test with ONLY Player 1 wired: P2 finishes every task automatically,
                            //     and P1's task shows on P1's own screen (LCD 1)
 #define TEST_TASK -1       // -1 = normal game. 0 PASSWORD, 1 SYNC, 2 HOLD, 3 COLOR, 4 DIAL, 5 SWITCH
@@ -588,6 +590,14 @@ void goReady() {
   LOGLN("START pressed");
 }
 
+bool startRequested(char k0, char k1) {
+  if (startBtn.wasPressed()) return true;
+#if START_WITH_KEY
+  if (k0 == '#' || k1 == '#') return true;
+#endif
+  return false;
+}
+
 // ======================= ARDUINO ENTRY POINTS =======================
 void setup() {
 #if DEBUG
@@ -632,7 +642,7 @@ void loop() {
 
   switch (phase) {
     case WAITING:
-      if (startBtn.wasPressed()) goReady();
+      if (startRequested(key[0], key[1])) goReady();
       break;
 
     case READY:
@@ -658,12 +668,12 @@ void loop() {
       break;
 
     case GAMEOVER:
-      if (now >= phaseUntil && startBtn.wasPressed()) goReady();
+      if (now >= phaseUntil && startRequested(key[0], key[1])) goReady();
       break;
 
     case WON:
       setSyncLeds((now / 200) % 2 == 0);              // celebrate: blink the sync LEDs
-      if (now >= phaseUntil && startBtn.wasPressed()) goReady();
+      if (now >= phaseUntil && startRequested(key[0], key[1])) goReady();
       break;
   }
 }
