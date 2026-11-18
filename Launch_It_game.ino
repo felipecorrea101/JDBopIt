@@ -11,9 +11,10 @@
     - Press START. Every round, each player gets a task to PERFORM, and the
       instruction for it is shown on the OTHER player's screen. The other player
       reads/says it. (Player 1's task shows on Player 2's screen and vice versa.)
-    - Both players act at the same time. If both finish before the time limit,
-      score +1 and the time limit shrinks. Any wrong action or timeout = 1 strike.
-    - 3 strikes and you are out. Reach WIN_SCORE (99) and the rocket launches (MISSION COMPLETE).
+    - The game is a series of STAGES: one task per player. Both players act at the same time.
+      A new stage only starts when BOTH have finished. Each stage = +1 point per player
+      (+2 total) and the stage time limit shrinks (starts at 15 s). Any wrong action or timeout = 1 strike.
+    - 3 strikes and you are out. Reach WIN_SCORE (100 points) and the rocket launches (MISSION COMPLETE).
     - Task types: PASSWORD (keypad), SYNC press, HOLD a color, COLOR code,
       launch DIAL, SWITCH code. A different sound plays for each task type.
     - COLOR letters: R = Red, G = Green, B = Black, Y = Yellow.
@@ -25,7 +26,8 @@
     Keypad P1: cols 34,35,36  rows 37,38,39,40
     Keypad P2: cols 41,42,43  rows 44,45,46,47
     Color buttons (Red,Green,Black,Yellow): P1 = D2-D5, P2 = D6-D9
-    Sync buttons: P1 D10, P2 D11     Sync LEDs: P1 D48, P2 D49
+    SYNC button = the RED color button (P1 D2, P2 D6). The old white sync buttons (D10/D11) are unused.
+    Sync LEDs = the light in the RED button: P1 D48, P2 D49 (blinks during a SYNC task)
     Start button D12, start LED D52, speaker D13
     Dial pots: P1 A0, P2 A1
     Toggles: P1 A2-A6, P2 A7-A11  (switch to GND, INPUT_PULLUP, on = LOW)
@@ -46,11 +48,11 @@
 #define TEST_TASK -1       // -1 = normal game. 0 PASSWORD, 1 SYNC, 2 HOLD, 3 COLOR, 4 DIAL, 5 SWITCH
                            // = test mode: only that task, and a failure just retries (no game over)
 
-const int  WIN_SCORE = 99;               // game ends after 99 successes (assignment spec)
+const int  WIN_SCORE = 100;              // total points (2 per stage, so 50 stages)
 const int  MAX_STRIKES = 3;             // 3 strikes and you are out
-const long TIME_START = 10000;            // ms allowed per round at the start
-const long TIME_MIN   = 4000;             // ms allowed per round at the end
-const long TIME_STEP  = 60;               // ms removed after every success
+const long TIME_START = 15000;            // ms allowed per stage at the start
+const long TIME_MIN   = 4000;             // shortest time allowed per stage
+const long TIME_STEP  = 225;              // ms removed after every cleared stage (15 s -> 4 s by stage 50)
 const unsigned long PW_VISIBLE   = 4000;  // password stays visible this long
 const unsigned long SYNC_WINDOW  = 250;   // both sync presses within this many ms
 const unsigned long HOLD_MIN_MS  = 3000;  // hold task: earliest RELEASE prompt
@@ -102,7 +104,6 @@ Keypad* KP[2] = {&kp1, &kp2};
 const byte COLOR_PINS[2][4] = {{2, 3, 4, 5}, {6, 7, 8, 9}};   // Red, Green, Black, Yellow
 const char COLOR_LETTERS[5] = "RGBY";
 const char* COLOR_NAMES[4] = {"RED", "GREEN", "BLACK", "YELLOW"};
-const byte SYNC_PIN[2]     = {10, 11};
 const byte SYNC_LED[2]     = {48, 49};
 const byte START_PIN       = 12;
 const byte START_LED       = 52;
@@ -138,7 +139,6 @@ struct Button {
 };
 
 Button colorBtn[2][4];
-Button syncBtn[2];
 Button startBtn;
 
 // ======================= SOUND (non-blocking) =======================
@@ -312,7 +312,6 @@ void initJob(byte p, Task t) {
   j.type = t;
   j.deadline = roundStart + timeLimit;
   for (byte i = 0; i < 4; i++) colorBtn[p][i].clear();
-  syncBtn[p].clear();
   KP[p]->getKey();                                   // flush any old key press
 
   switch (t) {
@@ -368,7 +367,7 @@ void startRound() {
   roundStart = millis();
   roundFailed = false;
   syncHas[0] = syncHas[1] = false;
-  timeLimit = TIME_START - (long)score * TIME_STEP;
+  timeLimit = TIME_START - (long)(score / 2) * TIME_STEP;   // score counts 2 per stage
   if (timeLimit < TIME_MIN) timeLimit = TIME_MIN;
 
   Task t[2];
@@ -389,7 +388,7 @@ void startRound() {
   initJob(1, t[1]);
 
   if (t[0] == T_SYNC) {
-    showBoth("SYNC PRESS!", "BOTH BUTTONS");
+    showBoth("SYNC PRESS!", "BOTH PRESS RED");
     PLAY(SND_SYNC);
   } else {
     showInstruction(0);
@@ -406,7 +405,7 @@ void startRound() {
 void updateSync() {
   unsigned long now = millis();
   for (byte p = 0; p < 2; p++) {
-    if (syncBtn[p].wasPressed()) { syncHas[p] = true; syncT[p] = syncBtn[p].pressTime; }
+    if (colorBtn[p][0].wasPressed()) { syncHas[p] = true; syncT[p] = colorBtn[p][0].pressTime; }
   }
   if (syncHas[0] && syncHas[1]) {
     long diff = (long)syncT[0] - (long)syncT[1];
@@ -505,8 +504,8 @@ void updateJob(byte p, char key) {
 void endRound(bool success) {
   setSyncLeds(false);
   if (success) {
-    score++;
-    LOG("SUCCESS, score = "); LOGLN(score);
+    score += 2;                                    // +1 per player
+    LOG("STAGE CLEARED, score = "); LOGLN(score);
     showBars(score);
     if (score >= WIN_SCORE) {
       showBoth("MISSION COMPLETE", "Press START");
@@ -521,7 +520,7 @@ void endRound(bool success) {
     }
     char buf[17];
     snprintf(buf, sizeof(buf), "Score: %d", score);
-    showBoth("SUCCESS!", buf);
+    showBoth("STAGE CLEAR!", buf);
     PLAY(SND_SUCCESS);
     phase = RESULT;
     phaseUntil = millis() + RESULT_MS;
@@ -584,7 +583,6 @@ void setup() {
 
   for (byte p = 0; p < 2; p++) {
     for (byte i = 0; i < 4; i++) colorBtn[p][i].begin(COLOR_PINS[p][i]);
-    syncBtn[p].begin(SYNC_PIN[p]);
     for (byte i = 0; i < 5; i++) pinMode(TOGGLE_PINS[p][i], INPUT_PULLUP);
     pinMode(SYNC_LED[p], OUTPUT);
   }
@@ -612,7 +610,6 @@ void loop() {
 
   for (byte p = 0; p < 2; p++) {
     for (byte i = 0; i < 4; i++) colorBtn[p][i].update();
-    syncBtn[p].update();
   }
   startBtn.update();
   char key[2] = {KP[0]->getKey(), KP[1]->getKey()};
