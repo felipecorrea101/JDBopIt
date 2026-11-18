@@ -237,7 +237,7 @@ int zoneOf(int v) {
 
 byte readToggles(byte p) {
   byte v = 0;
-  for (byte i = 0; i < 5; i++) if (digitalRead(TOGGLE_PINS[p][i]) == LOW) v |= (1 << i);
+  for (byte i = 0; i < 5; i++) if (digitalRead(TOGGLE_PINS[p][i]) == HIGH) v |= (1 << i);   // HIGH (lever up) = 1
   return v;
 }
 
